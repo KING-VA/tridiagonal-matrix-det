@@ -35,9 +35,9 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
   val a_addr_reg      = RegInit(0.U(32.W))
   val b_addr_reg      = RegInit(0.U(32.W))
   val c_addr_reg      = RegInit(0.U(32.W))
-  val a_size_reg      = RegInit(0.U(4.W))
-  val b_size_reg      = RegInit(0.U(4.W))
-  val c_size_reg      = RegInit(0.U(4.W))
+  val a_size_reg      = RegInit(0.U(5.W))
+  val b_size_reg      = RegInit(0.U(5.W))
+  val c_size_reg      = RegInit(0.U(5.W))
   val start_valid_reg = RegInit(false.B)
   val result_addr_reg = RegInit(0.U(32.W))
   val resp_rd_reg     = RegInit(0.U(5.W))
@@ -55,7 +55,7 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
   // IO
   val io = IO(new TriDiagDecouplerIO)
 
-  val unpackedSizing = rs2_data.asTypeOf(new StrippedSize(28, 4))
+  val unpackedSizing = rs2_data.asTypeOf(new StrippedSize(27, 5))
 
   // Unwrapping RoCCCommands
   when(io.rocc_cmd.fire & ~reset_wire) {

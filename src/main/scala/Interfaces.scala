@@ -4,13 +4,23 @@ import chisel3._
 import chisel3.util.Decoupled
 import chipsalliance.rocketchip.config.Parameters
 
-class TriDiagDetCoreIO extends Bundle {
+class TriDiagDetCoreIO extends Bundle { 
     val clk        = Input(Clock())
     val rst        = Input(Bool())
-    val we         = Input(Bool())
-    val address    = Input(UInt(8.W))
-    val write_data = Input(SInt(16.W))
-    val read_data  = Output(SInt(32.W)) 
+    val start      = Input(Bool())
+    val a_flat     = Input(UInt(240.W))
+    val b_flat     = Input(UInt(256.W))
+    val c_flat     = Input(UInt(240.W))
+    val det        = Output(SInt(32.W))
+    val done       = Output(Bool())
+
+    // We will just use the flattened data to verilog to make things easier for now -- this means that the core verilog will not be needed anymore
+    // val clk        = Input(Clock())
+    // val rst        = Input(Bool())
+    // val we         = Input(Bool())
+    // val address    = Input(UInt(8.W))
+    // val write_data = Input(SInt(16.W))
+    // val read_data  = Output(SInt(32.W))
 }
 
 class DecouplerControllerIO extends Bundle {
@@ -24,19 +34,19 @@ class DecouplerControllerIO extends Bundle {
   val a_ready     = Output(Bool())
   val a_valid     = Input(Bool())
   val a_addr      = Input(UInt(32.W))
-  val a_size      = Input(UInt(4.W))
+  val a_size      = Input(UInt(5.W))
 
   // B array interface
   val b_ready     = Output(Bool())
   val b_valid     = Input(Bool())
   val b_addr      = Input(UInt(32.W))
-  val b_size      = Input(UInt(4.W))
+  val b_size      = Input(UInt(5.W))
 
   // C array interface
   val c_ready     = Output(Bool())
   val c_valid     = Input(Bool())
   val c_addr      = Input(UInt(32.W))
-  val c_size      = Input(UInt(4.W))
+  val c_size      = Input(UInt(5.W))
 
   // Start computation
   val start_ready = Output(Bool())
@@ -49,8 +59,8 @@ class DecouplerControllerIO extends Bundle {
 
 class ControllerDMAIO (addrBits: Int, beatBytes: Int)(implicit p: Parameters) extends Bundle {
   val writeReq       = Decoupled(new DMAWriterReq(addrBits, beatBytes))
-  val readReq        = Decoupled(new DMAReaderReq(addrBits, 2)) // We will only be reading 2 bytes at a time (16 bits) since that is the value of the input
-  val readResp       = Flipped(Decoupled(new DMAReaderResp(2)))
+  val readReq        = Decoupled(new DMAReaderReq(addrBits, 256)) // 256 is the max read bits
+  val readResp       = Flipped(Decoupled(new DMAReaderResp(256)))
   val readRespQueue  = Flipped(Decoupled(UInt((beatBytes * 8).W)))
   val busy           = Input(Bool())
 }

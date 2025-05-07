@@ -19,7 +19,7 @@ module tridiag_det_core #(
     input wire [7:0] address,
 
     // Data bus
-    input wire [15:0] write_data, 
+    input wire [16:0] write_data,
     output wire [31:0] read_data
 );
 

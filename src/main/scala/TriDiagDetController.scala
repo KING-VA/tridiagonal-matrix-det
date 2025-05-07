@@ -26,15 +26,19 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   io.dcplrIO.busy := (cState =/= CtrlState.sIdle) | (mState =/= MemState.sIdle)
 
   // Internal Registers
+  val a_flat_reg = RegInit(0.U(240.W))
+  val b_flat_reg = RegInit(0.U(256.W))
+  val c_flat_reg = RegInit(0.U(240.W))
+
   val a_addr_reg = RegInit(0.U(32.W))
   val b_addr_reg = RegInit(0.U(32.W))
   val c_addr_reg = RegInit(0.U(32.W))
   val result_addr_reg = RegInit(0.U(32.W))
-  val a_size_reg = RegInit(0.U(4.W))
-  val b_size_reg = RegInit(0.U(4.W))
-  val c_size_reg = RegInit(0.U(4.W))
+  val a_size_reg = RegInit(0.U(5.W))
+  val b_size_reg = RegInit(0.U(5.W))
+  val c_size_reg = RegInit(0.U(5.W))
   val ready_check_reg = RegInit(false.B)
-  val counter_reg = RegInit(0.U(4.W))
+  val counter_reg = RegInit(0.U(5.W))
 
   // States (C - Controller, M - Memory)
   val cState = RegInit(CtrlState.sIdle)
@@ -71,13 +75,28 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   // Address Mapping
   when(cState === CtrlState.sASetup) {
     addrWire := a_addr_reg
-    curr_size := a_size_reg
+    // Make sure that a_size_reg is less than or equal to 15
+    if (a_size_reg > 15.U) {
+      curr_size := 15.U
+    } else {
+      curr_size := a_size_reg
+    }
   }.elsewhen(cState === CtrlState.sBSetup) {
     addrWire := b_addr_reg
-    curr_size := b_size_reg
+    // Make sure that b_size_reg is less than or equal to 16
+    if (b_size_reg > 16.U) {
+      curr_size := 16.U
+    } else {
+      curr_size := b_size_reg
+    }
   }.elsewhen(cState === CtrlState.sCSetup) {
     addrWire := c_addr_reg
-    curr_size := c_size_reg
+    // Make sure that c_size_reg is less than or equal to 15
+    if (c_size_reg > 15.U) {
+      curr_size := 15.U
+    } else {
+      curr_size := c_size_reg
+    }
   }.otherwise {
     addrWire := 0.U
     curr_size := 0.U
@@ -168,14 +187,25 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
       io.dmem.readReq.bits.addr := addrWire
       io.dmem.readReq.bits.totalBytes := 2.U
       when(io.dmem.readReq.fire()) {
-        // While counter_reg less than curr_size, increment the counter and set the address to the next value
-        when(counter_reg < (curr_size - 1.U)) {
-          counter_reg := counter_reg + 1.U
-          addrWire := addrWire + 2.U // Increment by 2 bytes (16 bits)
-          mStateWire := MemState.sReadReq // Stay in read request state
-        }.otherwise {
-          data_ld_done := true.B
-          mStateWire := MemState.sIdle
+        mStateWire := MemState.sReadIntoAccel
+      }
+    }
+    is(MemState.sReadIntoAccel) {
+      when (dequeue.io.dataOut.fire()) { // When we dequeue, read into the flat_regs
+      val data = dequeue.io.dataOut.bits(255, 0) // Read the data from the dequeue which dequeues 256 bits at a time
+      // Depending on size and state, we will load the data into the flat_regs with appropriate padding (remaining 16 bit chunks should be padded with 1s)
+        when(cState === CtrlState.sASetup) {
+          val padding_size = 15.U - curr_size // Calculate the padding needed for the data
+          val unpackedData = data.asTypeOf(new StrippedSize(240-(16*padding_size), 16+(16*padding_size))) // Unpack the data to the correct size
+          // Padding should be 1.U(16.W) concated padding_size times
+          val padding = 
+          a_flat_reg := Cat(unpackedData.a, 1.U(16.W)) // Pad with 1s to the left
+        }.elsewhen(cState === CtrlState.sBSetup) {
+          val padding = 16.U - curr_size // Calculate the padding needed for the data
+          b_flat_reg := Cat(data(255, 0), 1.U(16.W)) // Pad with 1s to the left
+        }.elsewhen(cState === CtrlState.sCSetup) {
+          val padding = 15.U - curr_size // Calculate the padding needed for the data
+          c_flat_reg := Cat(data(239, 0), 1.U(16.W)) // Pad with 1s to the left
         }
       }
     }

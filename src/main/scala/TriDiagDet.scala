@@ -11,7 +11,7 @@ class TriDiagDet(implicit p: Parameters) extends BlackBox with HasBlackBoxResour
   val io = IO(new TriDiagDetCoreIO)
 
   addResource("/vsrc/tridiag_det_algo.v")
-  addResource("/vsrc/tridiag_det_core.v")
+  // addResource("/vsrc/tridiag_det_core.v") -- Just go with flattening in Chisel for now
 }
 
 class TriDiagDetAccel(opcodes: OpcodeSet)(implicit p: Parameters) extends LazyRoCC(opcodes = opcodes, nPTWPorts = 0) {

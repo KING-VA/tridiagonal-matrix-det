@@ -9,6 +9,8 @@ import freechips.rocketchip.rocket.constants.{MemoryOpConstants}
 import freechips.rocketchip.tilelink.{TLIdentityNode, TLXbar}
 import testchipip.TLHelper
 
+// maxBytesRead is actually bits
+
 class DMAWriterReq(val addrBits: Int, val beatBytes: Int) extends Bundle {
   val addr = UInt(addrBits.W)
   val data = UInt((beatBytes * 8).W)
