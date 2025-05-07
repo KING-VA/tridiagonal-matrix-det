@@ -1,4 +1,5 @@
 package tridiagonal-matrix-det
+
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
@@ -18,9 +19,13 @@ class TriDiagControllerIO(addrBits: Int, beatBytes: Int)(implicit p: Parameters)
 class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) extends Module {
   val io = IO(new TriDiagControllerIO(addrBits, beatBytes))
   
-  // Set static signals for the TriDiag Core
+  // Set signals for the TriDiag Core
   io.triDiagCoreIO.rst := io.reset
   io.triDiagCoreIO.clk := clock
+  io.triDiagCoreIO.start := false.B // Start signal is set in the controller
+  io.triDiagCoreIO.a_flat := a_flat_reg
+  io.triDiagCoreIO.b_flat := b_flat_reg
+  io.triDiagCoreIO.c_flat := c_flat_reg
 
   // TODO: Need to update the busy signal if the ROCC is busy
   io.dcplrIO.busy := (cState =/= CtrlState.sIdle) | (mState =/= MemState.sIdle)
@@ -34,11 +39,16 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   val b_addr_reg = RegInit(0.U(32.W))
   val c_addr_reg = RegInit(0.U(32.W))
   val result_addr_reg = RegInit(0.U(32.W))
-  val a_size_reg = RegInit(0.U(5.W))
-  val b_size_reg = RegInit(0.U(5.W))
-  val c_size_reg = RegInit(0.U(5.W))
   val ready_check_reg = RegInit(false.B)
-  val counter_reg = RegInit(0.U(5.W))
+  
+  val done_load_a_reg = RegInit(false.B)
+  val done_load_b_reg = RegInit(false.B)
+  val done_load_c_reg = RegInit(false.B)
+
+  // DMA Read Queue
+  val dequeue = Module(new DMAOutputBuffer(beatBytes))
+  dequeue.io.dataOut.ready := mState === MemState.sReadIntoAccel
+  dequeue.io.dmaInput <> io.dmem.readRespQueue
 
   // States (C - Controller, M - Memory)
   val cState = RegInit(CtrlState.sIdle)
@@ -48,10 +58,10 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
 
   // Helper Wires
   val addrWire = Wire(UInt(32.W))
-  val curr_size = Wire(UInt(4.W))
   val data_wr_done = mState === MemState.sIdle
   val data_ld_done = mState === MemState.sIdle
-
+  val reversedData = Wire(UInt(32.W))
+  
   // Default DecouplerIO Signals
   io.dcplrIO.a_ready := false.B
   io.dcplrIO.b_ready := false.B
@@ -67,39 +77,15 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   io.dmem.readReq.bits.totalBytes := 0.U
   io.dmem.readResp.ready := false.B
 
-  // Default TriDiagCoreIO Signals
-  io.triDiagCoreIO.we := false.B
-  io.triDiagCoreIO.address := 0.U
-  io.triDiagCoreIO.write_data := 0.U
-
   // Address Mapping
   when(cState === CtrlState.sASetup) {
     addrWire := a_addr_reg
-    // Make sure that a_size_reg is less than or equal to 15
-    if (a_size_reg > 15.U) {
-      curr_size := 15.U
-    } else {
-      curr_size := a_size_reg
-    }
   }.elsewhen(cState === CtrlState.sBSetup) {
     addrWire := b_addr_reg
-    // Make sure that b_size_reg is less than or equal to 16
-    if (b_size_reg > 16.U) {
-      curr_size := 16.U
-    } else {
-      curr_size := b_size_reg
-    }
   }.elsewhen(cState === CtrlState.sCSetup) {
     addrWire := c_addr_reg
-    // Make sure that c_size_reg is less than or equal to 15
-    if (c_size_reg > 15.U) {
-      curr_size := 15.U
-    } else {
-      curr_size := c_size_reg
-    }
   }.otherwise {
     addrWire := 0.U
-    curr_size := 0.U
   }
 
   // Update states
@@ -117,62 +103,66 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
       io.dcplrIO.a_ready := true.B
       io.dcplrIO.b_ready := true.B
       io.dcplrIO.c_ready := true.B
-      io.dcplrIO.start_ready := true.B
+      io.dcplrIO.start_ready := done_load_a_reg && done_load_b_reg && done_load_c_reg
+      io.dcplrIO.status := Mux(done_load_a_reg && done_load_b_reg && done_load_c_reg, ControllerStatus.WaitingforStart, ControllerStatus.Idle)
+
+      io.dcplrIO.interrupt := false.B // Reset the interrupt signal
+      io.triDiagCoreIO.ack := false.B // Reset the ack signal
 
       when(io.dcplrIO.a_valid) {
         a_addr_reg := io.dcplrIO.a_addr
-        a_size_reg := io.dcplrIO.a_size
         mStateWire := MemState.sReadReq
         cStateWire := CtrlState.sASetup
       }.elsewhen(io.dcplrIO.b_valid) {
         b_addr_reg := io.dcplrIO.b_addr
-        b_size_reg := io.dcplrIO.b_size
         mStateWire := MemState.sReadReq
         cStateWire := CtrlState.sBSetup
       }.elsewhen(io.dcplrIO.c_valid) {
         c_addr_reg := io.dcplrIO.c_addr
-        c_size_reg := io.dcplrIO.c_size
         mStateWire := MemState.sReadReq
         cStateWire := CtrlState.sCSetup
-      }.elsewhen(io.dcplrIO.start_valid) {
+      }.elsewhen(io.dcplrIO.start_valid && io.dcplrIO.start_ready) {
         result_addr_reg := io.dcplrIO.result_addr
-        io.triDiagCoreIO.we := true.B
-        io.triDiagCoreIO.address := TriDiagAddr.CTRL
-        io.triDiagCoreIO.write_data := 1.U // Start signal
+        io.triDiagCoreIO.start := true.B // Start the computation
         cStateWire := CtrlState.sRun
       }
     }
     is(CtrlState.sASetup) {
       when(data_ld_done) {
+        done_load_a_reg := true.B
         cStateWire := CtrlState.sIdle
       }
     }
     is(CtrlState.sBSetup) {
       when(data_ld_done) {
+        done_load_b_reg := true.B
         cStateWire := CtrlState.sIdle
       }
     }
     is(CtrlState.sCSetup) {
       when(data_ld_done) {
+        done_load_c_reg := true.B
         cStateWire := CtrlState.sIdle
       }
     }
     is(CtrlState.sRun) {
-      io.triDiagCoreIO.address := TriDiagAddr.STATUS
-      when(io.triDiagCoreIO.read_data(0) === ready_check_reg) {
-        when(ready_check_reg === false.B) {
-          ready_check_reg := true.B
-        }.otherwise {
-          ready_check_reg := false.B
-          mStateWire := MemState.sWriteReq
-          cStateWire := CtrlState.sDataWrite
-        }
+      io.triDiagCoreIO.start := true.B // Start the computation
+      io.dcplrIO.status := ControllerStatus.Running // Set the status to running
+      when(io.triDiagCoreIO.done) {
+        io.triDiagCoreIO.start := false.B // Stop the computation
+        cStateWire := CtrlState.sDataWrite // Move to data write state
+        mStateWire := MemState.sWriteReq // Move to memory write state
       }
     }
     is(CtrlState.sDataWrite) {
+      io.dcplrIO.status := ControllerStatus.Done // Set the status to done
       when(data_wr_done) {
-        io.dcplrIO.interrupt := true.B
+        io.triDiagCoreIO.ack := true.B // Acknowledge the core
         cStateWire := CtrlState.sIdle
+        done_load_a_reg := false.B // Reset the load registers
+        done_load_b_reg := false.B
+        done_load_c_reg := false.B
+        io.dcplrIO.interrupt := true.B // Set the interrupt to true when done
       }
     }
   }
@@ -180,40 +170,40 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   // Memory FSM
   switch(mState) {
     is(MemState.sIdle) {
-      counter_reg := 0.U
+      io.dmem.readReq.valid := false.B
+      io.dmem.writeReq.valid := false.B
+
     }
     is(MemState.sReadReq) {
       io.dmem.readReq.valid := true.B
       io.dmem.readReq.bits.addr := addrWire
-      io.dmem.readReq.bits.totalBytes := 2.U
+      io.dmem.readReq.bits.totalBytes := (256 / 8).U
       when(io.dmem.readReq.fire()) {
         mStateWire := MemState.sReadIntoAccel
       }
     }
     is(MemState.sReadIntoAccel) {
       when (dequeue.io.dataOut.fire()) { // When we dequeue, read into the flat_regs
-      val data = dequeue.io.dataOut.bits(255, 0) // Read the data from the dequeue which dequeues 256 bits at a time
-      // Depending on size and state, we will load the data into the flat_regs with appropriate padding (remaining 16 bit chunks should be padded with 1s)
+        // Depending on size and state, we will load the data into the flat_regs
         when(cState === CtrlState.sASetup) {
-          val padding_size = 15.U - curr_size // Calculate the padding needed for the data
-          val unpackedData = data.asTypeOf(new StrippedSize(240-(16*padding_size), 16+(16*padding_size))) // Unpack the data to the correct size
-          // Padding should be 1.U(16.W) concated padding_size times
-          val padding = 
-          a_flat_reg := Cat(unpackedData.a, 1.U(16.W)) // Pad with 1s to the left
+          a_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the A array with 240 bits
         }.elsewhen(cState === CtrlState.sBSetup) {
-          val padding = 16.U - curr_size // Calculate the padding needed for the data
-          b_flat_reg := Cat(data(255, 0), 1.U(16.W)) // Pad with 1s to the left
+          b_flat_reg := dequeue.io.dataOut.bits(255, 0) // Load the B array with 256 bits
         }.elsewhen(cState === CtrlState.sCSetup) {
-          val padding = 15.U - curr_size // Calculate the padding needed for the data
-          c_flat_reg := Cat(data(239, 0), 1.U(16.W)) // Pad with 1s to the left
+          c_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the C array with 240 bits
         }
-      }
+        mStateWire := MemState.sIdle // Set the state back to idle
     }
     is(MemState.sWriteReq) {
-      // Write result to memory
-      when(data_wr_done) {
+      io.dmem.writeReq.bits.addr := result_addr_reg
+      io.dmem.writeReq.bits.totalBytes := beatBytes
+      // Take the results from the TriDiag Core and reverse them for little endian
+      reversedData := Cat(io.triDiagCoreIO.det(7, 0), io.triDiagCoreIO.det(15, 8), io.triDiagCoreIO.det(23, 16), io.triDiagCoreIO.det(31, 24))
+      io.dmem.writeReq.bits.data := Cat(0.U((beatBytes*8-32).W), reversedData) // Write the data to the result address
+      io.dmem.writeReq.valid := true.B
+      when(io.dmem.writeReq.fire()) {
         mStateWire := MemState.sIdle
-      }
+      }     
     }
   }
 }

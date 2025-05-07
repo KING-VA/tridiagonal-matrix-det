@@ -6,12 +6,12 @@ import chisel3.experimental.ChiselEnum
 // TriDiag ISA
 // If the size is shorter than 16 for READIN, the data is padded with 1s to the left, consistency must be maintained in that A & C should be 1 value shorter than B
 // The flow is as follows (loading must be done in this order -- TODO allow any order):
-// 1. READIN_A: Load the A array into the accelerator (RS1 = address, RS2 = size)
-// 2. READIN_C: Load the C array into the accelerator (RS1 = address, RS2 = size) here size must be equal to A
-// 3. READIN_B: Load the B array into the accelerator (RS1 = address, RS2 = size) here size should be strictly +1 than A & C
-// For all readins, the controller will read in 256 bits via DMA and then shave the results until the given size is reached (the rest till 16 will be padded by 1s if size is less than 16)
+// 1. READIN_A: Load the A array into the accelerator (RS1 = address)
+// 2. READIN_C: Load the C array into the accelerator (RS1 = address)
+// 3. READIN_B: Load the B array into the accelerator (RS1 = address) 
+// For all readins, the controller will read in 256 bits via DMA and then shave the results for A & C to 240 bits (16 bytes) and B to 256 bits (32 bytes) -- firmware will handle the padding
 // 4. START_COMP: Start the computation (RS1 = address) - this command will start the computation (the return address is stored in the controller until the core is done and returns the result which then the controller uses to write back the result to the given address)
-// 5. QUERYSTATUS: Check the status of the accelerator (Idle, Loaded_A, Loaded_C, Loaded_B, WaitingforStart, Running, Done) - this command will check the status and return the status to RD of the instruction
+// QUERYSTATUS: Check the status of the accelerator (Idle, Loaded_A, Loaded_C, Loaded_B, WaitingforStart, Running, Done) - this command will check the status and return the status to RD of the instruction
 object TriDiagISA {
   val READIN_A = 0.U(7.W) // RS1 sets the address in memory to start reading from & the size of the data is set by RS2
   val READIN_C = 1.U(7.W) // RS1 sets the address in memory to start reading from & the size of the data is set by RS2
@@ -40,7 +40,7 @@ object TriDiagAddr {
 
 // Main Controller States
 object CtrlState extends ChiselEnum {
-  val sIdle, sASetup, sBSetup, sCSetup, sRun, sDataWrite, Error = Value
+  val sIdle, sASetup, sBSetup, sCSetup, sRun, sDataWrite, sError = Value
 }
 
 // Memory Controller States
@@ -51,10 +51,8 @@ object MemState extends ChiselEnum {
 // Create the status enum for the controller
 object ControllerStatus {
   val Idle = 0.U(3.W) // Idle state
-  val Loaded_A = 1.U(3.W) // A array loaded
-  val Loaded_AC = 2.U(3.W) // A & C arrays loaded
-  val WaitingforStart = 3.U(3.W) // Waiting for start signal
-  val Running = 4.U(3.W) // Running the computation
-  val Done = 5.U(3.W) // Computation done
-  val Error = 6.U(3.W) // Error state
+  val WaitingforStart = 1.U(3.W) // Waiting for start signal
+  val Running = 2.U(3.W) // Running the computation
+  val Done = 3.U(3.W) // Computation done
+  val Error = 4.U(3.W) // Error state
 }

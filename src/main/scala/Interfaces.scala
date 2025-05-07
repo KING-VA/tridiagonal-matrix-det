@@ -8,6 +8,7 @@ class TriDiagDetCoreIO extends Bundle {
     val clk        = Input(Clock())
     val rst        = Input(Bool())
     val start      = Input(Bool())
+    val ack        = Input(Bool())
     val a_flat     = Input(UInt(240.W))
     val b_flat     = Input(UInt(256.W))
     val c_flat     = Input(UInt(240.W))
@@ -34,19 +35,16 @@ class DecouplerControllerIO extends Bundle {
   val a_ready     = Output(Bool())
   val a_valid     = Input(Bool())
   val a_addr      = Input(UInt(32.W))
-  val a_size      = Input(UInt(5.W))
 
   // B array interface
   val b_ready     = Output(Bool())
   val b_valid     = Input(Bool())
   val b_addr      = Input(UInt(32.W))
-  val b_size      = Input(UInt(5.W))
 
   // C array interface
   val c_ready     = Output(Bool())
   val c_valid     = Input(Bool())
   val c_addr      = Input(UInt(32.W))
-  val c_size      = Input(UInt(5.W))
 
   // Start computation
   val start_ready = Output(Bool())

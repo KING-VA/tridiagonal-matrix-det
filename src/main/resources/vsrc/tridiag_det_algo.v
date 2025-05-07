@@ -5,6 +5,7 @@ module tridiag_det_algo #(
     input clk,
     input rst,
     input start,
+    input ack,
     input [WIDTH*(N-1)-1:0] a_flat,  // Flattened a[0] to a[N-2] from LSB to MSB
     input [WIDTH*N-1:0] b_flat,      // Flattened b[0] to b[N-1] from LSB to MSB
     input [WIDTH*(N-1)-1:0] c_flat,  // Flattened c[0] to c[N-2] from LSB to MSB
@@ -49,9 +50,12 @@ module tridiag_det_algo #(
                         D1 <= D2;
                         i <= i + 1;
                     end else begin
-                        det <= D2;
-                        state <= IDLE;
-                        done <= 1;
+                        if (ack) begin
+                            state <= IDLE;
+                        end else begin
+                            det <= D2;
+                            done <= 1;
+                        end
                     end
                 end
             endcase

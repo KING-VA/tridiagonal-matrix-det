@@ -6,11 +6,6 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.RoCCCommand
 import freechips.rocketchip.tile.RoCCResponse
 
-class StrippedSize(val paritionASize: Int, val paritionBSize: Int) extends Bundle {
-  val a = UInt(paritionASize.W)
-  val b = UInt(paritionBSize.W)
-}
-
 class TriDiagDecouplerIO(implicit p: Parameters) extends Bundle {
   // System Signal
   val reset     = Input(Bool())
@@ -35,9 +30,6 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
   val a_addr_reg      = RegInit(0.U(32.W))
   val b_addr_reg      = RegInit(0.U(32.W))
   val c_addr_reg      = RegInit(0.U(32.W))
-  val a_size_reg      = RegInit(0.U(5.W))
-  val b_size_reg      = RegInit(0.U(5.W))
-  val c_size_reg      = RegInit(0.U(5.W))
   val start_valid_reg = RegInit(false.B)
   val result_addr_reg = RegInit(0.U(32.W))
   val resp_rd_reg     = RegInit(0.U(5.W))
@@ -55,28 +47,20 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
   // IO
   val io = IO(new TriDiagDecouplerIO)
 
-  val unpackedSizing = rs2_data.asTypeOf(new StrippedSize(27, 5))
-
   // Unwrapping RoCCCommands
   when(io.rocc_cmd.fire & ~reset_wire) {
     switch(funct) {
       is(TriDiagISA.READIN_A) {
         a_valid_reg := true.B
         a_addr_reg  := rs1_data
-        // For sizing, the max is 16 so we can use 4 bits and anything above 16 is ignored
-        a_size_reg  := unpackedSizing.b
       }
       is(TriDiagISA.READIN_B) {
         b_valid_reg := true.B
         b_addr_reg  := rs1_data
-        // For sizing, the max is 16 so we can use 4 bits and anything above 16 is ignored
-        b_size_reg  := unpackedSizing.b
       }
       is(TriDiagISA.READIN_C) {
         c_valid_reg := true.B
         c_addr_reg  := rs1_data
-        // For sizing, the max is 16 so we can use 4 bits and anything above 16 is ignored
-        c_size_reg  := unpackedSizing.b
       }
       is(TriDiagISA.START_COMP) {
         start_valid_reg := true.B
@@ -122,13 +106,10 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
   io.ctrlIO.excp_valid  := excp_valid_reg
   io.ctrlIO.a_valid     := a_valid_reg
   io.ctrlIO.a_addr      := a_addr_reg
-  io.ctrlIO.a_size      := a_size_reg
   io.ctrlIO.b_valid     := b_valid_reg
   io.ctrlIO.b_addr      := b_addr_reg
-  io.ctrlIO.b_size      := b_size_reg
   io.ctrlIO.c_valid     := c_valid_reg
   io.ctrlIO.c_addr      := c_addr_reg
-  io.ctrlIO.c_size      := c_size_reg
   io.ctrlIO.start_valid := start_valid_reg
   io.ctrlIO.result_addr := result_addr_reg
 
