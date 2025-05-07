@@ -1,0 +1,56 @@
+package tridiagonal-matrix-det
+
+import chisel3._
+import chisel3.util.Decoupled
+import chipsalliance.rocketchip.config.Parameters
+
+class TriDiagDetCoreIO extends Bundle {
+    val clk        = Input(Clock())
+    val rst        = Input(Bool())
+    val we         = Input(Bool())
+    val address    = Input(UInt(8.W))
+    val write_data = Input(SInt(16.W))
+    val read_data  = Output(SInt(32.W)) 
+}
+
+class DecouplerControllerIO extends Bundle {
+  // Exception handling
+  val excp_ready  = Output(Bool())
+  val excp_valid  = Input(Bool())
+  val interrupt   = Output(Bool())
+  val busy        = Output(Bool())
+
+  // A array interface
+  val a_ready     = Output(Bool())
+  val a_valid     = Input(Bool())
+  val a_addr      = Input(UInt(32.W))
+  val a_size      = Input(UInt(4.W))
+
+  // B array interface
+  val b_ready     = Output(Bool())
+  val b_valid     = Input(Bool())
+  val b_addr      = Input(UInt(32.W))
+  val b_size      = Input(UInt(4.W))
+
+  // C array interface
+  val c_ready     = Output(Bool())
+  val c_valid     = Input(Bool())
+  val c_addr      = Input(UInt(32.W))
+  val c_size      = Input(UInt(4.W))
+
+  // Start computation
+  val start_ready = Output(Bool())
+  val start_valid = Input(Bool())
+  val result_addr = Input(UInt(32.W))
+
+  // Status Interface
+  val status = Output(UInt(3.W)) // 3 bits for Idle, Loaded_A, Loaded_C, Loaded_B, WaitingforStart, Running, Done
+}
+
+class ControllerDMAIO (addrBits: Int, beatBytes: Int)(implicit p: Parameters) extends Bundle {
+  val writeReq       = Decoupled(new DMAWriterReq(addrBits, beatBytes))
+  val readReq        = Decoupled(new DMAReaderReq(addrBits, 2)) // We will only be reading 2 bytes at a time (16 bits) since that is the value of the input
+  val readResp       = Flipped(Decoupled(new DMAReaderResp(2)))
+  val readRespQueue  = Flipped(Decoupled(UInt((beatBytes * 8).W)))
+  val busy           = Input(Bool())
+}
