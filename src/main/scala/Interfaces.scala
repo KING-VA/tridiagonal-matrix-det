@@ -12,7 +12,7 @@ class TriDiagDetCoreIO extends Bundle {
     val a_flat     = Input(UInt(240.W))
     val b_flat     = Input(UInt(256.W))
     val c_flat     = Input(UInt(240.W))
-    val det        = Output(SInt(32.W))
+    val det        = Output(SInt(64.W))
     val done       = Output(Bool())
 }
 

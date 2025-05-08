@@ -44,7 +44,7 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   val addrWire = Wire(UInt(32.W))
   val data_wr_done = mState === MemState.sIdle
   val data_ld_done = mState === MemState.sIdle
-  val reversedData = Wire(UInt(32.W))
+  val reversedData = Wire(UInt(64.W))
 
   // DMA Read Queue
   val dequeue = Module(new DMAOutputBuffer(beatBytes))
@@ -192,13 +192,18 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
     }
     is(MemState.sReadIntoAccel) {
       when (dequeue.io.dataOut.ready && dequeue.io.dataOut.valid) { // When we dequeue, read into the flat_regs
+      
+        //Create a function to reverse 16 bit chunks
+        def reverse16(data: UInt): UInt = {
+          Cat((0 until 16).reverse.map(i => data(16*(i+1)-1, 16*i)))
+        }
         // Depending on size and state, we will load the data into the flat_regs
         when(cState === CtrlState.sASetup) {
-          a_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the A array with 240 bits
+          a_flat_reg := reverse16(dequeue.io.dataOut.bits)(239, 0) // Load the A array with 240 bits
         }.elsewhen(cState === CtrlState.sBSetup) {
-          b_flat_reg := dequeue.io.dataOut.bits(255, 0) // Load the B array with 256 bits
+          b_flat_reg := reverse16(dequeue.io.dataOut.bits)(255, 0) // Load the B array with 256 bits
         }.elsewhen(cState === CtrlState.sCSetup) {
-          c_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the C array with 240 bits
+          c_flat_reg := reverse16(dequeue.io.dataOut.bits)(239, 15) // Load the C array with 240 bits
         }
         mStateWire := MemState.sIdle // Set the state back to idle
       }
@@ -207,8 +212,9 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
       io.dmem.writeReq.bits.addr := result_addr_reg
       io.dmem.writeReq.bits.totalBytes := beatBytes.U
       // Take the results from the TriDiag Core and reverse them for little endian
-      reversedData := Cat(io.triDiagCoreIO.det(7, 0), io.triDiagCoreIO.det(15, 8), io.triDiagCoreIO.det(23, 16), io.triDiagCoreIO.det(31, 24))
-      io.dmem.writeReq.bits.data := Cat(0.U((beatBytes*8-32).W), reversedData) // Write the data to the result address
+      reversedData := Cat(io.triDiagCoreIO.det(7, 0), io.triDiagCoreIO.det(15, 8), io.triDiagCoreIO.det(23, 16), io.triDiagCoreIO.det(31, 24), 
+                          io.triDiagCoreIO.det(39, 32), io.triDiagCoreIO.det(47, 40), io.triDiagCoreIO.det(55, 48), io.triDiagCoreIO.det(63, 56))
+      io.dmem.writeReq.bits.data := reversedData.asSInt.pad(beatBytes * 8).asUInt // Write the data to the result address
       io.dmem.writeReq.valid := true.B
       when(io.dmem.writeReq.ready && io.dmem.writeReq.valid) {
         mStateWire := MemState.sIdle

@@ -10,17 +10,17 @@ module TriDiagDet #(
     input [WIDTH*N-1:0] b_flat,      // Flattened b[0] to b[N-1] from LSB to MSB
     input [WIDTH*(N-1)-1:0] c_flat,  // Flattened c[0] to c[N-2] from LSB to MSB
     output reg done,
-    output reg signed [2*WIDTH-1:0] det,
+    output reg signed [4*WIDTH-1:0] det
 );
     // FSM states
     localparam IDLE = 1'd0, CALC = 1'd1;
-    reg state;
+    reg state = IDLE;
 
     // Internal loop index
     reg [$clog2(N):0] i;
 
     // Recurrence result storage
-    reg signed [2*WIDTH-1:0] D0, D1, D2;
+    reg signed [4*WIDTH-1:0] D0, D1, D2;
 
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -36,8 +36,8 @@ module TriDiagDet #(
                 IDLE: begin
                     done <= 0;
                     if (start) begin
-                        D0 <= {{(32-WIDTH){b_flat[WIDTH-1]}}, b_flat[WIDTH-1:0]};
-                        D1 <= $signed(b_flat[2*WIDTH-1:WIDTH])*$signed(b_flat[WIDTH-1:0]) - $signed(a_flat[WIDTH-1:0])*$signed(c_flat[WIDTH-1:0]);
+                        D0 <= $signed(b_flat[0 +: WIDTH]);
+                        D1 <= $signed($signed($signed(b_flat[WIDTH +: WIDTH])*$signed(b_flat[0 +: WIDTH])) - $signed($signed(a_flat[0 +: WIDTH])*$signed(c_flat[0 +: WIDTH])));
                         i <= 2;
                         state <= CALC;
                     end
@@ -45,16 +45,17 @@ module TriDiagDet #(
 
                 CALC: begin
                     if (i < N) begin
-                        D2 <= $signed(b_flat[i*WIDTH +: WIDTH])*D1 - $signed(a_flat[(i-1)*WIDTH +: WIDTH])*$signed(c_flat[(i-1)*WIDTH +: WIDTH])*D0;
+                        D2 <= $signed($signed($signed(b_flat[i*WIDTH +: WIDTH])*D1) - $signed($signed(a_flat[(i-1)*WIDTH +: WIDTH])*$signed(c_flat[(i-1)*WIDTH +: WIDTH])*D0));
                         D0 <= D1;
                         D1 <= D2;
                         i <= i + 1;
                     end else begin
-                        if (ack) begin
-                            state <= IDLE;
-                        end else begin
-                            det <= D2;
+                        if (i == N) begin
+                            det <= D1;
                             done <= 1;
+                            i <= 0;
+                        end else if (ack) begin
+                            state <= IDLE;
                         end
                     end
                 end
