@@ -1,8 +1,8 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util.Decoupled
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 class TriDiagDetCoreIO extends Bundle { 
     val clk        = Input(Clock())
@@ -14,14 +14,6 @@ class TriDiagDetCoreIO extends Bundle {
     val c_flat     = Input(UInt(240.W))
     val det        = Output(SInt(32.W))
     val done       = Output(Bool())
-
-    // We will just use the flattened data to verilog to make things easier for now -- this means that the core verilog will not be needed anymore
-    // val clk        = Input(Clock())
-    // val rst        = Input(Bool())
-    // val we         = Input(Bool())
-    // val address    = Input(UInt(8.W))
-    // val write_data = Input(SInt(16.W))
-    // val read_data  = Output(SInt(32.W))
 }
 
 class DecouplerControllerIO extends Bundle {

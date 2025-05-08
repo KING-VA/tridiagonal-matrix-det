@@ -1,8 +1,9 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util.HasBlackBoxResource
-import chipsalliance.rocketchip.config.Parameters
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.{HasCoreParameters, LazyRoCC, LazyRoCCModuleImp, OpcodeSet}
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.SystemBusKey
@@ -10,7 +11,7 @@ import freechips.rocketchip.subsystem.SystemBusKey
 class TriDiagDet(implicit p: Parameters) extends BlackBox with HasBlackBoxResource {
   val io = IO(new TriDiagDetCoreIO)
 
-  addResource("/vsrc/tridiag_det_algo.v")
+  addResource("/vsrc/TriDiagDet.v")
   // addResource("/vsrc/tridiag_det_core.v") -- Just go with flattening in Chisel for now
 }
 
@@ -26,7 +27,7 @@ class TriDiagDetAccelImp(outer: TriDiagDetAccel)(implicit p: Parameters) extends
 
   // RoCC Decoupler
   val dcplr = Module(new RoCCDecoupler)
-  dcplr.io.reset     := reset.asBool()
+  dcplr.io.reset     := reset
   dcplr.io.rocc_cmd  <> io.cmd
   io.resp            <> dcplr.io.rocc_resp
   io.busy            := dcplr.io.rocc_busy
@@ -34,8 +35,8 @@ class TriDiagDetAccelImp(outer: TriDiagDetAccel)(implicit p: Parameters) extends
   dcplr.io.rocc_excp := io.exception
 
   // Controller
-  val ctrl = Module(new TriDiagDetController(32, beatBytes))
-  ctrl.io.reset   := reset.asBool()
+  val ctrl = Module(new TriDiagController(32, beatBytes))
+  ctrl.io.reset   := reset
   ctrl.io.dcplrIO <> dcplr.io.ctrlIO
 
   // DMA Connections

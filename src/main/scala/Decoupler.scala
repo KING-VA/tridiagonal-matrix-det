@@ -1,8 +1,9 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util.Decoupled
-import chipsalliance.rocketchip.config.Parameters
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.RoCCCommand
 import freechips.rocketchip.tile.RoCCResponse
 
@@ -21,7 +22,7 @@ class TriDiagDecouplerIO(implicit p: Parameters) extends Bundle {
   val ctrlIO  = Flipped(new DecouplerControllerIO)
 }
 
-class TriDiagDecoupler(implicit p: Parameters) extends Module {
+class RoCCDecoupler(implicit p: Parameters) extends Module {
   // Internal Registers
   val excp_valid_reg  = RegInit(false.B)
   val a_valid_reg     = RegInit(false.B)
@@ -49,29 +50,23 @@ class TriDiagDecoupler(implicit p: Parameters) extends Module {
 
   // Unwrapping RoCCCommands
   when(io.rocc_cmd.fire & ~reset_wire) {
-    switch(funct) {
-      is(TriDiagISA.READIN_A) {
-        a_valid_reg := true.B
-        a_addr_reg  := rs1_data
-      }
-      is(TriDiagISA.READIN_B) {
-        b_valid_reg := true.B
-        b_addr_reg  := rs1_data
-      }
-      is(TriDiagISA.READIN_C) {
-        c_valid_reg := true.B
-        c_addr_reg  := rs1_data
-      }
-      is(TriDiagISA.START_COMP) {
-        start_valid_reg := true.B
-        result_addr_reg := rs1_data
-      }
-      is(TriDiagISA.QUERYSTATUS) {
-        resp_rd_reg    := rd
-        // Set response data to be {padding, busy, status from controller}
-        resp_data_reg  := Cat(0.U(28.W), busy, io.ctrlIO.status)
-        resp_valid_reg := true.B
-      }
+    when(funct === TriDiagISA.READIN_A) {
+      a_valid_reg := true.B
+      a_addr_reg  := rs1_data
+    }.elsewhen(funct === TriDiagISA.READIN_B) {
+      b_valid_reg := true.B
+      b_addr_reg  := rs1_data
+    }.elsewhen(funct === TriDiagISA.READIN_C) {
+      c_valid_reg := true.B
+      c_addr_reg  := rs1_data
+    }.elsewhen(funct === TriDiagISA.START_COMP) {
+      start_valid_reg := true.B
+      result_addr_reg := rs1_data
+    }.elsewhen(funct === TriDiagISA.QUERYSTATUS) {
+      resp_rd_reg    := rd
+      // Set response data to be {padding, busy, status from controller}
+      resp_data_reg  := Cat(0.U(28.W), busy, io.ctrlIO.status)
+      resp_valid_reg := true.B
     }
   }
 

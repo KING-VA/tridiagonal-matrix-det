@@ -1,13 +1,13 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util._
 import chisel3.experimental._
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.rocket.constants.{MemoryOpConstants}
 import freechips.rocketchip.tilelink.{TLIdentityNode, TLXbar}
-import testchipip.TLHelper
+import freechips.rocketchip.tilelink._
 
 // maxBytesRead is actually bits
 
@@ -46,12 +46,12 @@ class DMAPacketAssembler(beatBytes: Int) extends Module {
   val counter = RegInit(0.U(log2Ceil(beatBytes + 1).W))
   val packedData = RegInit(0.U((8 * beatBytes).W))
 
-  when (io.producer.data.fire()) {
-    packedData := packedData | (io.producer.data.bits << (counter << 3).asUInt()).asUInt()
+  when (io.producer.data.ready && io.producer.data.valid) {
+    packedData := packedData | (io.producer.data.bits << (counter << 3))
     counter := counter + 1.U
   }
 
-  when (io.dmaOut.fire()) {
+  when (io.dmaOut.ready && io.dmaOut.valid) {
     packedData := 0.U
     counter := 0.U
   }
@@ -78,12 +78,12 @@ class DMAPacketDisassembler(beatBytes: Int) extends Module {
   val counter = RegInit(0.U(log2Ceil(beatBytes + 1).W))
   val wideData = RegInit(0.U((8 * beatBytes).W))
 
-  when (io.dmaIn.fire()) {
+  when (io.dmaIn.ready && io.dmaIn.valid) {
     wideData := io.dmaIn.bits
     counter := beatBytes.U
   }
 
-  when (io.consumer.data.fire()) {
+  when (io.consumer.data.ready && io.consumer.data.valid) {
     wideData := wideData >> 8
     counter := counter - 1.U
   }
@@ -108,6 +108,12 @@ class DMAReadIO(addrBits: Int, beatBytes: Int, maxReadBytes: Int) extends Bundle
   val queue = Decoupled(UInt((beatBytes * 8).W))
 }
 
+class DMAIO(paddrBits:Int, beatBytes:Int, maxBytesRead:Int) extends Bundle {
+  val read = new DMAReadIO(paddrBits, beatBytes, maxBytesRead)
+  val write = new DMAWriteIO(paddrBits, beatBytes)
+  val readBusy = Output(Bool())
+  val writeBusy = Output(Bool())
+}
 
 class DMA(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Parameters) extends LazyModule {
   val id_node = TLIdentityNode()
@@ -123,13 +129,9 @@ class DMA(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Parameter
   xbar_node := reader.node
   id_node := xbar_node
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = IO(new Bundle {
-      val read = new DMAReadIO(paddrBits, beatBytes, maxReadBytes)
-      val write = new DMAWriteIO(paddrBits, beatBytes)
-      val readBusy = Output(Bool())
-      val writeBusy = Output(Bool())
-    })
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {
+    val io = IO(new DMAIO(paddrBits, beatBytes, maxReadBytes))
 
     val readQ = Queue(reader.module.io.queue) // Queue of read data
     val writeQ = Queue(io.write.req) // Queue of write requests
@@ -147,21 +149,24 @@ class DMA(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Parameter
 
 }
 
+class DMAWriterIO(paddrBits: Int, beatBytes: Int) extends Bundle {
+  val req = Flipped(Decoupled(new DMAWriterReq(paddrBits, beatBytes)))
+  val busy = Output(Bool())
+}
+
 class DMAWriter(beatBytes: Int, name: String)(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode(
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
     name = name,
     sourceId = IdRange(0, 1) // Identifies the valid IDs for this node. NOTE: Does not influence actual bundle creation (e.g. it's just a label)
-  )
+  )))))
 
-  lazy val module = new LazyModuleImp(this) with MemoryOpConstants {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with MemoryOpConstants {
     val (mem, edge) = node.out(0)
 
     val paddrBits = edge.bundle.addressBits
 
-    val io = IO(new Bundle {
-      val req = Flipped(Decoupled(new DMAWriterReq(paddrBits, beatBytes)))
-      val busy = Output(Bool())
-    })
+    val io = IO(new DMAWriterIO(paddrBits, beatBytes))
 
     val req = Reg(new DMAWriterReq(paddrBits, beatBytes))
 
@@ -186,8 +191,8 @@ class DMAWriter(beatBytes: Int, name: String)(implicit p: Parameters) extends La
       fromSource = 0.U,
       toAddress = req.addr,
       lgSize = log2Ceil(beatBytes).U,
-      data = (req.data << shiftData).asUInt(),
-      mask = (mask(bytesLeft) << shiftMask).asUInt())._2
+      data = (req.data << shiftData),
+      mask = (mask(bytesLeft) << shiftMask))._2
 
     mem.a.valid := state === s_write
     mem.a.bits := Mux(bytesLeft < beatBytes.U, putPartial, put)
@@ -202,14 +207,14 @@ class DMAWriter(beatBytes: Int, name: String)(implicit p: Parameters) extends La
       state := s_resp
     }
 
-    when (mem.d.fire()) {
+    when (mem.d.ready && mem.d.valid) {
       state := Mux(bytesLeft === 0.U, s_done, s_write)
     }
 
     io.req.ready := state === s_idle | state === s_done
     io.busy := ~io.req.ready
 
-    when (io.req.fire()) {
+    when (io.req.ready && io.req.valid) {
       req := io.req.bits
       bytesSent := 0.U
       state := s_write
@@ -217,23 +222,26 @@ class DMAWriter(beatBytes: Int, name: String)(implicit p: Parameters) extends La
   }
 }
 
+class DMAReaderIO(paddrBits: Int, beatBytes: Int, maxReadBytes: Int) extends Bundle {
+  val req = Flipped(Decoupled(new DMAReaderReq(paddrBits, maxReadBytes)))
+  val resp = Decoupled(new DMAReaderResp(maxReadBytes))
+  val queue = Decoupled(UInt((beatBytes * 8).W))
+  val busy = Output(Bool())
+}
+
 class DMAReader(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Parameters) extends LazyModule {
-  val node = TLHelper.makeClientNode(
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
     name = name,
     sourceId = IdRange(1, 2) // Identifies the valid IDs for this node. NOTE: Does not influence actual bundle creation (e.g. it's just a label)
-  )
+  )))))
 
-  lazy val module = new LazyModuleImp(this) with MemoryOpConstants {
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with MemoryOpConstants {
     val (mem, edge) = node.out(0)
 
     val paddrBits = edge.bundle.addressBits
 
-    val io = IO(new Bundle {
-      val req = Flipped(Decoupled(new DMAReaderReq(paddrBits, maxReadBytes)))
-      val resp = Decoupled(new DMAReaderResp(maxReadBytes))
-      val queue = Decoupled(UInt((beatBytes * 8).W))
-      val busy = Output(Bool())
-    })
+    val io = IO(new DMAReaderIO(paddrBits, beatBytes, maxReadBytes))
 
     val req = Reg(new DMAReaderReq(paddrBits, maxReadBytes))
 
@@ -261,12 +269,12 @@ class DMAReader(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Par
     // TODO Both writer and reader needs to have mem.d.ready high for the xbar.d.ready to be high for some reason...
     mem.d.ready := true.B
 
-    when (mem.d.fire()) {
+    when (mem.d.valid && mem.d.ready) {
       dataBytes := mem.d.bits.data // TODO: mask off the unwanted bytes if bytesLeft < beatBytes.U using a mask vector and register
       state := s_queue
     }
 
-    when (io.queue.fire() && state === s_queue) {
+    when (io.queue.ready && io.queue.valid && state === s_queue) {
       state := Mux(bytesLeft === 0.U, s_done, s_read)
     }
 
@@ -277,7 +285,7 @@ class DMAReader(beatBytes: Int, maxReadBytes: Int, name: String)(implicit p: Par
     io.queue.bits := dataBytes
     io.busy := ~io.req.ready
 
-    when (io.req.fire()) {
+    when (io.req.ready && io.req.valid) {
       req := io.req.bits
       bytesRead := 0.U
       state := s_read

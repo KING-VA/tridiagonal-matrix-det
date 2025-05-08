@@ -1,4 +1,4 @@
-module tridiag_det_algo #(
+module TriDiagDet #(
     parameter N = 16, // Ensure N is greater than 2 and less than or equal to 16 for address space
     parameter WIDTH = 16 // Max width of data is 16 bits to accommodate 32 bits for the determinant output
 )(

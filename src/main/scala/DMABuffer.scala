@@ -1,4 +1,4 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util._
@@ -14,7 +14,7 @@ class DMAOutputBuffer(beatBytes: Int) extends Module {
   val wideData = RegInit(0.U(256.W))
 
   // Input logic: accumulate input data into wideData
-  when(io.dmaInput.fire()) {
+  when(io.dmaInput.valid && io.dmaInput.ready) {
     wideData := (io.dmaInput.bits << bitsFilled) | wideData
     bitsFilled := bitsFilled + (beatBytes * 8).U
   }
@@ -31,7 +31,7 @@ class DMAOutputBuffer(beatBytes: Int) extends Module {
   io.dataOut.bits := reversedData
 
   // Only shift out data when consumer accepts it
-  when(io.dataOut.fire()) {
+  when(io.dataOut.valid && io.dataOut.ready) {
     wideData := 0.U
     bitsFilled := 0.U
   }

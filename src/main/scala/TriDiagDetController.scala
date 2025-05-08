@@ -1,8 +1,8 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 class TriDiagControllerIO(addrBits: Int, beatBytes: Int)(implicit p: Parameters) extends Bundle {
   // System
@@ -18,17 +18,6 @@ class TriDiagControllerIO(addrBits: Int, beatBytes: Int)(implicit p: Parameters)
 
 class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) extends Module {
   val io = IO(new TriDiagControllerIO(addrBits, beatBytes))
-  
-  // Set signals for the TriDiag Core
-  io.triDiagCoreIO.rst := io.reset
-  io.triDiagCoreIO.clk := clock
-  io.triDiagCoreIO.start := false.B // Start signal is set in the controller
-  io.triDiagCoreIO.a_flat := a_flat_reg
-  io.triDiagCoreIO.b_flat := b_flat_reg
-  io.triDiagCoreIO.c_flat := c_flat_reg
-
-  // TODO: Need to update the busy signal if the ROCC is busy
-  io.dcplrIO.busy := (cState =/= CtrlState.sIdle) | (mState =/= MemState.sIdle)
 
   // Internal Registers
   val a_flat_reg = RegInit(0.U(240.W))
@@ -45,11 +34,6 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   val done_load_b_reg = RegInit(false.B)
   val done_load_c_reg = RegInit(false.B)
 
-  // DMA Read Queue
-  val dequeue = Module(new DMAOutputBuffer(beatBytes))
-  dequeue.io.dataOut.ready := mState === MemState.sReadIntoAccel
-  dequeue.io.dmaInput <> io.dmem.readRespQueue
-
   // States (C - Controller, M - Memory)
   val cState = RegInit(CtrlState.sIdle)
   val cStateWire = WireDefault(cState)
@@ -61,6 +45,11 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   val data_wr_done = mState === MemState.sIdle
   val data_ld_done = mState === MemState.sIdle
   val reversedData = Wire(UInt(32.W))
+
+  // DMA Read Queue
+  val dequeue = Module(new DMAOutputBuffer(beatBytes))
+  dequeue.io.dataOut.ready := mState === MemState.sReadIntoAccel
+  dequeue.io.dmaInput <> io.dmem.readRespQueue
   
   // Default DecouplerIO Signals
   io.dcplrIO.a_ready := false.B
@@ -76,6 +65,25 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
   io.dmem.readReq.bits.addr := 0.U
   io.dmem.readReq.bits.totalBytes := 0.U
   io.dmem.readResp.ready := false.B
+  io.dmem.writeReq.valid := false.B
+  io.dmem.writeReq.bits.addr := 0.U
+  io.dmem.writeReq.bits.data := 0.U
+  io.dmem.writeReq.bits.totalBytes := 0.U
+
+
+  // Set signals for the TriDiag Core
+  io.triDiagCoreIO.rst := io.reset
+  io.triDiagCoreIO.clk := clock
+  io.triDiagCoreIO.start := false.B // Start signal is set in the controller
+  io.triDiagCoreIO.ack := false.B // Acknowledge signal is set in the controller
+  io.triDiagCoreIO.a_flat := a_flat_reg
+  io.triDiagCoreIO.b_flat := b_flat_reg
+  io.triDiagCoreIO.c_flat := c_flat_reg
+
+  reversedData := 0.U
+
+  // TODO: Need to update the busy signal if the ROCC is busy
+  io.dcplrIO.busy := (cState =/= CtrlState.sIdle) | (mState =/= MemState.sIdle)
 
   // Address Mapping
   when(cState === CtrlState.sASetup) {
@@ -178,12 +186,12 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
       io.dmem.readReq.valid := true.B
       io.dmem.readReq.bits.addr := addrWire
       io.dmem.readReq.bits.totalBytes := (256 / 8).U
-      when(io.dmem.readReq.fire()) {
+      when(io.dmem.readReq.ready && io.dmem.readReq.valid) {
         mStateWire := MemState.sReadIntoAccel
       }
     }
     is(MemState.sReadIntoAccel) {
-      when (dequeue.io.dataOut.fire()) { // When we dequeue, read into the flat_regs
+      when (dequeue.io.dataOut.ready && dequeue.io.dataOut.valid) { // When we dequeue, read into the flat_regs
         // Depending on size and state, we will load the data into the flat_regs
         when(cState === CtrlState.sASetup) {
           a_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the A array with 240 bits
@@ -193,15 +201,16 @@ class TriDiagController(addrBits: Int, beatBytes: Int)(implicit p: Parameters) e
           c_flat_reg := dequeue.io.dataOut.bits(239, 0) // Load the C array with 240 bits
         }
         mStateWire := MemState.sIdle // Set the state back to idle
+      }
     }
     is(MemState.sWriteReq) {
       io.dmem.writeReq.bits.addr := result_addr_reg
-      io.dmem.writeReq.bits.totalBytes := beatBytes
+      io.dmem.writeReq.bits.totalBytes := beatBytes.U
       // Take the results from the TriDiag Core and reverse them for little endian
       reversedData := Cat(io.triDiagCoreIO.det(7, 0), io.triDiagCoreIO.det(15, 8), io.triDiagCoreIO.det(23, 16), io.triDiagCoreIO.det(31, 24))
       io.dmem.writeReq.bits.data := Cat(0.U((beatBytes*8-32).W), reversedData) // Write the data to the result address
       io.dmem.writeReq.valid := true.B
-      when(io.dmem.writeReq.fire()) {
+      when(io.dmem.writeReq.ready && io.dmem.writeReq.valid) {
         mStateWire := MemState.sIdle
       }     
     }

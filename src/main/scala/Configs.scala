@@ -1,6 +1,6 @@
-package tridiagonal-matrix-det
+package TriDiagMatDet
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tile.{BuildRoCC, OpcodeSet}
 
