@@ -36,7 +36,7 @@ module TriDiagDet #(
                 IDLE: begin
                     done <= 0;
                     if (start) begin
-                        D0 <= $signed(b_flat[WIDTH-1:0]);
+                        D0 <= {{(32-WIDTH){b_flat[WIDTH-1]}}, b_flat[WIDTH-1:0]};
                         D1 <= $signed(b_flat[2*WIDTH-1:WIDTH])*$signed(b_flat[WIDTH-1:0]) - $signed(a_flat[WIDTH-1:0])*$signed(c_flat[WIDTH-1:0]);
                         i <= 2;
                         state <= CALC;
@@ -45,7 +45,7 @@ module TriDiagDet #(
 
                 CALC: begin
                     if (i < N) begin
-                        D2 <= $signed(b_flat[(i+1)*WIDTH-1:i*WIDTH])*D1 - $signed(a_flat[i*WIDTH-1:(i-1)*WIDTH])*$signed(c_flat[i*WIDTH-1:(i-1)*WIDTH])*D0;
+                        D2 <= $signed(b_flat[i*WIDTH +: WIDTH])*D1 - $signed(a_flat[(i-1)*WIDTH +: WIDTH])*$signed(c_flat[(i-1)*WIDTH +: WIDTH])*D0;
                         D0 <= D1;
                         D1 <= D2;
                         i <= i + 1;
